@@ -5,6 +5,7 @@ using Neo.Ledger;
 using Neo.Network.P2P.Payloads;
 using Neo.Persistence;
 using Neo.SmartContract.Manifest;
+using Neo.VM.Types;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,8 +15,6 @@ namespace Neo.SmartContract.Native
 {
     public sealed class ContractManagement : NativeContract
     {
-        public override int Id => 0;
-
         private const byte Prefix_MinimumDeploymentFee = 20;
         private const byte Prefix_NextAvailableId = 15;
         private const byte Prefix_Contract = 8;
@@ -50,7 +49,7 @@ namespace Neo.SmartContract.Native
                 },
                 new ContractEventDescriptor
                 {
-                    Name = "Destory",
+                    Name = "Destroy",
                     Parameters = new ContractParameterDefinition[]
                     {
                         new ContractParameterDefinition()
@@ -82,12 +81,12 @@ namespace Neo.SmartContract.Native
         {
             foreach (NativeContract contract in Contracts)
             {
-                if (contract.ActiveBlockIndex != engine.Snapshot.PersistingBlock.Index)
+                if (contract.ActiveBlockIndex != engine.PersistingBlock.Index)
                     continue;
                 engine.Snapshot.Storages.Add(CreateStorageKey(Prefix_Contract).Add(contract.Hash), new StorageItem(new ContractState
                 {
                     Id = contract.Id,
-                    Script = contract.Script,
+                    Nef = contract.Nef,
                     Hash = contract.Hash,
                     Manifest = contract.Manifest
                 }));
@@ -122,7 +121,7 @@ namespace Neo.SmartContract.Native
         }
 
         [ContractMethod(0, CallFlags.WriteStates | CallFlags.AllowNotify)]
-        private ContractState Deploy(ApplicationEngine engine, byte[] nefFile, byte[] manifest)
+        private ContractState Deploy(ApplicationEngine engine, byte[] nefFile, byte[] manifest, StackItem data)
         {
             if (!(engine.ScriptContainer is Transaction tx))
                 throw new InvalidOperationException();
@@ -145,7 +144,7 @@ namespace Neo.SmartContract.Native
             {
                 Id = GetNextAvailableId(engine.Snapshot),
                 UpdateCounter = 0,
-                Script = nef.Script,
+                Nef = nef,
                 Hash = hash,
                 Manifest = ContractManifest.Parse(manifest)
             };
@@ -156,9 +155,9 @@ namespace Neo.SmartContract.Native
 
             // Execute _deploy
 
-            ContractMethodDescriptor md = contract.Manifest.Abi.GetMethod("_deploy");
+            ContractMethodDescriptor md = contract.Manifest.Abi.GetMethod("_deploy", 2);
             if (md != null)
-                engine.CallFromNativeContract(Hash, hash, md.Name, false);
+                engine.CallFromNativeContract(Hash, hash, md.Name, data, false);
 
             engine.SendNotification(Hash, "Deploy", new VM.Types.Array { contract.Hash.ToArray() });
 
@@ -166,7 +165,7 @@ namespace Neo.SmartContract.Native
         }
 
         [ContractMethod(0, CallFlags.WriteStates | CallFlags.AllowNotify)]
-        private void Update(ApplicationEngine engine, byte[] nefFile, byte[] manifest)
+        private void Update(ApplicationEngine engine, byte[] nefFile, byte[] manifest, StackItem data)
         {
             if (nefFile is null && manifest is null) throw new ArgumentException();
 
@@ -180,25 +179,26 @@ namespace Neo.SmartContract.Native
                 if (nefFile.Length == 0)
                     throw new ArgumentException($"Invalid NefFile Length: {nefFile.Length}");
 
-                NefFile nef = nefFile.AsSerializable<NefFile>();
-
-                // Update script
-                contract.Script = nef.Script;
+                // Update nef
+                contract.Nef = nefFile.AsSerializable<NefFile>();
             }
             if (manifest != null)
             {
                 if (manifest.Length == 0 || manifest.Length > ContractManifest.MaxLength)
                     throw new ArgumentException($"Invalid Manifest Length: {manifest.Length}");
-                contract.Manifest = ContractManifest.Parse(manifest);
-                if (!contract.Manifest.IsValid(contract.Hash))
+                ContractManifest manifest_new = ContractManifest.Parse(manifest);
+                if (manifest_new.Name != contract.Manifest.Name)
+                    throw new InvalidOperationException("The name of the contract can't be changed.");
+                if (!manifest_new.IsValid(contract.Hash))
                     throw new InvalidOperationException($"Invalid Manifest Hash: {contract.Hash}");
+                contract.Manifest = manifest_new;
             }
             contract.UpdateCounter++; // Increase update counter
             if (nefFile != null)
             {
-                ContractMethodDescriptor md = contract.Manifest.Abi.GetMethod("_deploy");
+                ContractMethodDescriptor md = contract.Manifest.Abi.GetMethod("_deploy", 2);
                 if (md != null)
-                    engine.CallFromNativeContract(Hash, contract.Hash, md.Name, true);
+                    engine.CallFromNativeContract(Hash, contract.Hash, md.Name, data, true);
             }
             engine.SendNotification(Hash, "Update", new VM.Types.Array { contract.Hash.ToArray() });
         }
@@ -213,7 +213,7 @@ namespace Neo.SmartContract.Native
             engine.Snapshot.Storages.Delete(ckey);
             foreach (var (key, _) in engine.Snapshot.Storages.Find(BitConverter.GetBytes(contract.Id)))
                 engine.Snapshot.Storages.Delete(key);
-            engine.SendNotification(Hash, "Destory", new VM.Types.Array { hash.ToArray() });
+            engine.SendNotification(Hash, "Destroy", new VM.Types.Array { hash.ToArray() });
         }
     }
 }

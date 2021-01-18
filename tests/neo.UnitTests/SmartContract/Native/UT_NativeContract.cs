@@ -26,14 +26,12 @@ namespace Neo.UnitTests.SmartContract.Native
         [TestMethod]
         public void TestInitialize()
         {
-            ApplicationEngine ae = ApplicationEngine.Create(TriggerType.Application, null, null, 0);
+            ApplicationEngine ae = ApplicationEngine.Create(TriggerType.Application, null, null, null, 0);
             testNativeContract.Initialize(ae);
         }
 
         private class DummyNative : NativeContract
         {
-            public override int Id => 1;
-
             [ContractMethod(0, CallFlags.None)]
             public void NetTypes(
                     bool p1, sbyte p2, byte p3, short p4, ushort p5, int p6, uint p7, long p8, ulong p9, BigInteger p10,
@@ -53,7 +51,7 @@ namespace Neo.UnitTests.SmartContract.Native
         public void TestToParameter()
         {
             var manifest = new DummyNative().Manifest;
-            var netTypes = manifest.Abi.GetMethod("netTypes");
+            var netTypes = manifest.Abi.GetMethod("netTypes", 17);
 
             Assert.AreEqual(netTypes.ReturnType, ContractParameterType.Void);
             Assert.AreEqual(netTypes.Parameters[0].Type, ContractParameterType.Boolean);
@@ -74,7 +72,7 @@ namespace Neo.UnitTests.SmartContract.Native
             Assert.AreEqual(netTypes.Parameters[15].Type, ContractParameterType.Integer);
             Assert.AreEqual(netTypes.Parameters[16].Type, ContractParameterType.Any);
 
-            var vmTypes = manifest.Abi.GetMethod("vMTypes");
+            var vmTypes = manifest.Abi.GetMethod("vMTypes", 8);
 
             Assert.AreEqual(vmTypes.ReturnType, ContractParameterType.Void);
             Assert.AreEqual(vmTypes.Parameters[0].Type, ContractParameterType.Boolean);
@@ -90,7 +88,7 @@ namespace Neo.UnitTests.SmartContract.Native
         [TestMethod]
         public void TestGetContract()
         {
-            Assert.IsTrue(NativeContract.NEO == NativeContract.GetContract(NativeContract.NEO.Name));
+            Assert.IsTrue(NativeContract.NEO == NativeContract.GetContract(NativeContract.NEO.Id));
             Assert.IsTrue(NativeContract.NEO == NativeContract.GetContract(NativeContract.NEO.Hash));
         }
 
@@ -98,8 +96,8 @@ namespace Neo.UnitTests.SmartContract.Native
         public void TestInvoke()
         {
             var snapshot = Blockchain.Singleton.GetSnapshot();
-            ApplicationEngine engine = ApplicationEngine.Create(TriggerType.OnPersist, null, snapshot, 0);
-            engine.LoadScript(testNativeContract.Script, CallFlags.All, testNativeContract.Hash);
+            ApplicationEngine engine = ApplicationEngine.Create(TriggerType.OnPersist, null, snapshot, null, 0);
+            engine.LoadScript(testNativeContract.Script, configureState: p => p.ScriptHash = testNativeContract.Hash);
 
             ByteString method1 = new ByteString(System.Text.Encoding.Default.GetBytes("wrongMethod"));
             VMArray args1 = new VMArray();
@@ -119,10 +117,10 @@ namespace Neo.UnitTests.SmartContract.Native
         {
             var snapshot = Blockchain.Singleton.GetSnapshot();
 
-            ApplicationEngine engine1 = ApplicationEngine.Create(TriggerType.Application, null, snapshot, 0);
+            ApplicationEngine engine1 = ApplicationEngine.Create(TriggerType.Application, null, snapshot, null, 0);
             Assert.ThrowsException<InvalidOperationException>(() => testNativeContract.TestTrigger(engine1));
 
-            ApplicationEngine engine2 = ApplicationEngine.Create(TriggerType.OnPersist, null, snapshot, 0);
+            ApplicationEngine engine2 = ApplicationEngine.Create(TriggerType.OnPersist, null, snapshot, null, 0);
             testNativeContract.TestTrigger(engine2);
         }
 
@@ -136,8 +134,6 @@ namespace Neo.UnitTests.SmartContract.Native
 
     public class TestNativeContract : NativeContract
     {
-        public override int Id => 0x10000006;
-
         [ContractMethod(0, CallFlags.None)]
         public string HelloWorld => "hello world";
 
